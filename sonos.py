@@ -9,7 +9,7 @@ def get_coordinator():
     zps = soco.discover()
 
     # print(dir(list(zps)[0]))
-    return next(zp for zp in zps if zp.is_coordinator)
+    return next(zp for zp in zps if zp.is_coordinator and len(zp.get_queue()))
 
 def enqueue_playlist(zp, playlist_path):
     with open(playlist_path, "rb") as f:
