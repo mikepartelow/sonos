@@ -39,7 +39,7 @@ def dump_playlists(zp, playlists_dir):
 
 def dump_queue(zp, playlists_dir):
     timestamp = datetime.datetime.today().strftime("%Y%m%d%H%M%S")
-    tracks = [ item.to_dict() for item in zp.get_queue() ]
+    tracks = [ item.to_dict() for item in zp.get_queue(max_items=99999) ]
 
     with open("{}/queue.{}.json".format(playlists_dir, timestamp), "wb") as f:
         f.write(json.dumps(tracks))
