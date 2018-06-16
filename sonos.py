@@ -11,6 +11,16 @@ def get_coordinator():
     # print(dir(list(zps)[0]))
     return next(zp for zp in zps if zp.is_coordinator and len(zp.get_queue()))
 
+def silence(zp_name):
+    zps = soco.discover()
+
+    for zp in zps:
+        if zp.player_name == zp_name:
+            print("silencing {}".format(zp_name))
+            zp.volume = 0
+            zp.mute = True
+
+
 def enqueue_playlist(zp, playlist_path):
     with open(playlist_path, "rb") as f:
         playlist = json.loads(f.read())
@@ -48,21 +58,24 @@ if __name__ == "__main__":
     # FIXME: this would be much nicer with sub-parsers
     #
     parser = argparse.ArgumentParser(description='SONOS queue and playlist manipulation.')
-    parser.add_argument('command', action='store', type=str, choices=['dump-playlists', 'dump-queue', 'enqueue'],
+    parser.add_argument('command', action='store', type=str,
+                        choices=['dump-playlists', 'dump-queue', 'enqueue', 'silence'],
                         help='what to do')
-    parser.add_argument('path', action='store', type=str,
-                        help='path to playlist to enqueue, or path to directory for playlist/queue dump')
+    parser.add_argument('path_or_zp', action='store', type=str,
+                        help='path to playlist to enqueue, or path to directory for playlist/queue dump, or ZP to silence')
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.path):
-        parser.exit(2, "ERROR: path {} not found\n".format(args.path))
+    if args.command != 'silence' and not os.path.exists(args.path_or_zp):
+        parser.exit(2, "ERROR: path {} not found\n".format(args.path_or_zp))
 
     if args.command == 'dump-playlists':
-        dump_playlists(get_coordinator(), args.path)
+        dump_playlists(get_coordinator(), args.path_or_zp)
     elif args.command == 'dump-queue':
-        dump_queue(get_coordinator(), args.path)
+        dump_queue(get_coordinator(), args.path_or_zp)
     elif args.command == 'enqueue':
-        enqueue_playlist(get_coordinator(), args.path)
+        enqueue_playlist(get_coordinator(), args.path_or_zp)
+    elif args.command == 'silence':
+        silence(args.path_or_zp)
 
     parser.exit(0)
