@@ -163,7 +163,7 @@ class BrowserControl(FormattedTextControl):
             w = event.app.layout.current_window
 
             if w and w.render_info:
-                line_index = len(self.lines())-1
+                line_index = len(self.the_list)-1
                 self.adjust_cursor_position(y=line_index)
                 w.vertical_scroll = line_index
 
@@ -177,6 +177,11 @@ class BrowserControl(FormattedTextControl):
             else:
                 self.path_stack.pop()
 
+        @kb.add('e')
+        def _(event):
+            path = os.path.join(*self.path_stack)
+            zp = next(zp for zp in get_coordinators() if zp.get_speaker_info()['zone_name'] == 'Home Theatre')
+            enqueue_playlist(zp, path)
         return kb
 
 def build_key_bindings():
@@ -195,8 +200,8 @@ def build_key_bindings():
 
 def make_app(playlists_dir):
     def status_bar_text():
-        name = "Yabba Dabba Doo"
-        return "{name} : 'q': quit | 'z': undo | '?' help | <up>/<down> moves | <space> toggles".format(name=name)
+        name = "ZorP"
+        return "{name} : 'q': quit | <up>/<down> moves | <space> selects | 'e' enqueues".format(name=name)
 
     listview_window = Window(BrowserControl(playlists_dir))
     status_bar_window = Window(content=FormattedTextControl(status_bar_text), height=1, style='reverse')
@@ -222,10 +227,10 @@ if __name__ == "__main__":
     #
     parser = argparse.ArgumentParser(description='SONOS queue and playlist manipulation.')
     parser.add_argument('command', action='store', type=str,
-                        choices=['dump-playlists', 'dump-queue', 'enqueue', 'silence', 'ui', ],
+                        choices=['dump-playlists', 'dump-queue', 'silence', 'ui', ],
                         help='what to do')
     parser.add_argument('path_or_zp', action='store', type=str,
-                        help='path to playlist to enqueue, or path to directory for playlist/queue dump, or ZP to silence')
+                        help='path to directory for playlist/queue dump, or ZP to silence')
 
     args = parser.parse_args()
 
@@ -242,3 +247,9 @@ if __name__ == "__main__":
         ui(args.path_or_zp)
 
     parser.exit(0)
+
+# TODO :
+#   - dialog to pick ZP for enqueue
+#   - conf dialog before enqueue
+#   - works for multi-level subdirs (os.path.join(root_path, x) makes assumption of 1-level depth)
+#   - enqueues proper human readable names
