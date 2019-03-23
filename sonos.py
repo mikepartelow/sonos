@@ -15,16 +15,11 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.containers import HSplit, Window, FloatContainer
 
-def get_coordinator():
-    zps = soco.discover()
-
-    # print(dir(list(zps)[0]))
-    return next(zp for zp in zps if zp.is_coordinator and len(zp.get_queue()))
+def get_coordinators():
+    return (zp for zp in soco.discover() if zp.is_coordinator and len(zp.get_queue()))
 
 def silence(zp_name):
-    zps = soco.discover()
-
-    for zp in zps:
+    for zp in soco.discover():
         if zp.player_name == zp_name:
             print("silencing {}".format(zp_name))
             zp.volume = 0
@@ -48,28 +43,38 @@ def enqueue_playlist(zp, playlist_path):
 
         zp.add_to_queue(item)
 
-def dump_playlists(zp, playlists_dir):
-    for playlist in zp.get_sonos_playlists():
-        print(playlist.title)
+def dump_playlists(zps, playlists_dir):
+    for zp in zps:
+        for playlist in zp.get_sonos_playlists():
+            zpname = zp.get_speaker_info()['zone_name']
+            path = "{}/{}.{}.json".format(playlists_dir, zpname, playlist.title)
 
-        tracks = [ track.to_dict() for track in zp.music_library.browse(playlist) ]
+            print(playlist.title)
 
-        with open("{}/{}.json".format(playlists_dir, playlist.title), "wb") as f:
+            tracks = [ track.to_dict() for track in zp.music_library.browse(playlist) ]
+
+            with open(path, "wb") as f:
+                f.write(json.dumps(tracks).encode('utf-8'))
+
+def dump_queue(zps, playlists_dir):
+    for zp in zps:
+        timestamp = datetime.datetime.today().strftime("%Y%m%d%H%M%S")
+        zpname = zp.get_speaker_info()['zone_name']
+        path = "{}/queue.{}.{}.json".format(playlists_dir, zpname, timestamp)
+
+        tracks = [ item.to_dict() for item in zp.get_queue(max_items=99999) ]
+
+        with open(path, "wb") as f:
             f.write(json.dumps(tracks).encode('utf-8'))
-
-def dump_queue(zp, playlists_dir):
-    timestamp = datetime.datetime.today().strftime("%Y%m%d%H%M%S")
-    tracks = [ item.to_dict() for item in zp.get_queue(max_items=99999) ]
-
-    with open("{}/queue.{}.json".format(playlists_dir, timestamp), "wb") as f:
-        f.write(json.dumps(tracks).encode('utf-8'))
 
 class BrowserControl(FormattedTextControl):
     def __init__(self, root_path):
         self.root_path = root_path
         self.path_stack = [self.root_path,]
-        self.the_list = []
         self.cursor_position = Point(0,0)
+        self.cursor_stack = [self.cursor_position.y,]
+        self.the_list = []
+
         self.fetch_list()
         super().__init__(text=self.text, get_cursor_position=lambda: self.cursor_position, key_bindings=self.build_key_bindings())
 
@@ -129,7 +134,8 @@ class BrowserControl(FormattedTextControl):
             if len(self.path_stack) > 1:
                 self.path_stack.pop()
                 self.fetch_list()
-                self.adjust_cursor_position(y=0)
+                pos = self.cursor_stack.pop()
+                self.adjust_cursor_position(y=pos)
 
         @kb.add('c-f')
         def _(event):
@@ -166,6 +172,7 @@ class BrowserControl(FormattedTextControl):
             path = os.path.join(self.root_path, self.the_list[self.cursor_position.y])
             self.path_stack.append(path)
             if self.fetch_list():
+                self.cursor_stack.append(self.cursor_position.y)
                 self.adjust_cursor_position(y=0)
             else:
                 self.path_stack.pop()
@@ -208,8 +215,6 @@ def make_app(playlists_dir):
 def ui(playlists_dir):
     make_app(playlists_dir).run()
 
-
-
 if __name__ == "__main__":
     logging.basicConfig(filename='sonos.log', level=logging.DEBUG)
 
@@ -228,11 +233,9 @@ if __name__ == "__main__":
         parser.exit(2, "ERROR: path {} not found\n".format(args.path_or_zp))
 
     if args.command == 'dump-playlists':
-        dump_playlists(get_coordinator(), args.path_or_zp)
+        dump_playlists(get_coordinators(), args.path_or_zp)
     elif args.command == 'dump-queue':
-        dump_queue(get_coordinator(), args.path_or_zp)
-    elif args.command == 'enqueue':
-        enqueue_playlist(get_coordinator(), args.path_or_zp)
+        dump_queue(get_coordinators(), args.path_or_zp)
     elif args.command == 'silence':
         silence(args.path_or_zp)
     elif args.command == 'ui':
