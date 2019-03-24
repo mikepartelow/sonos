@@ -6,22 +6,23 @@ import soco
 import logging
 import datetime
 import argparse
-import soco.data_structures
+from soco.compat import urlparse
 from prompt_toolkit import Application
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.layout.screen import Point
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.controls import FormattedTextControl
+from soco.data_structures import to_didl_string, DidlMusicTrack
 from prompt_toolkit.layout.containers import HSplit, Window, FloatContainer
 
 def get_coordinators():
-    return (zp for zp in soco.discover() if zp.is_coordinator and len(zp.get_queue()))
+    return (zp for zp in soco.discover() if zp.is_coordinator)
 
 def silence(zp_name):
     for zp in soco.discover():
         if zp.player_name == zp_name:
-            print("silencing {}".format(zp_name))
+            logging.info("silencing {}".format(zp_name))
             zp.volume = 0
             zp.mute = True
 
@@ -30,18 +31,37 @@ def enqueue_playlist(zp, playlist_path):
     with open(playlist_path, "rb") as f:
         playlist = json.loads(f.read())
 
-    print(playlist[0])
+    logging.info(playlist[0])
 
     for track in playlist:
         uri = track['resources'][0]['uri']
-        title = track['title']
-        item_id = track['item_id']
-        parent_id = track['parent_id']
+        # don't know what this is. DO know that it is required if we want proper title/artist info in Sonos Queue.
+        desc = 'SA_RINCON3079_X_'
 
-        res = [soco.data_structures.DidlResource(uri=uri, protocol_info="x-rincon-playlist:*:*:*")]
-        item = soco.data_structures.DidlObject(resources=res, title=title, parent_id=parent_id, item_id=item_id)
+        # Now we need to create a DIDL item id. It seems to be based on the uri
+        path = urlparse(uri).path
+        # Strip any extensions, eg .mp3, from the end of the path
+        path = path.rsplit('.', 1)[0]
+        # The ID has an 8 (hex) digit prefix. But it doesn't seem to matter what it is!
+        track_id = '08675309{0}'.format(path)
 
-        zp.add_to_queue(item)
+        didl = DidlMusicTrack(
+            item_id=track_id,
+            parent_id=track['parent_id'],
+            title=track['title'],
+            # whatever TF this is, if it's absent, enqueued items don't have title/creator metadata
+            desc='SA_RINCON3079_X_'
+        )
+
+        # have to do this all at a low, API-subverting level so that we can stuff the all important magic "desc" field in there.
+
+        zp.avTransport.AddURIToQueue([
+            ('InstanceID', 0),
+            ('EnqueuedURI', uri),
+            ('EnqueuedURIMetaData', to_didl_string(didl)),
+            ('DesiredFirstTrackNumberEnqueued', 0),
+            ('EnqueueAsNext', 1)
+        ])
 
 def dump_playlists(zps, playlists_dir):
     for zp in zps:
@@ -49,7 +69,7 @@ def dump_playlists(zps, playlists_dir):
             zpname = zp.get_speaker_info()['zone_name']
             path = "{}/{}.{}.json".format(playlists_dir, zpname, playlist.title)
 
-            print(playlist.title)
+            logging.info(playlist.title)
 
             tracks = [ track.to_dict() for track in zp.music_library.browse(playlist) ]
 
@@ -100,7 +120,7 @@ class BrowserControl(FormattedTextControl):
             else:
                 ansi0, ansi1 = '', ''
 
-            return " {idx:>3} {ansi0}{item}{ansi1}".format(idx=idx, ansi0=ansi0, ansi1=ansi1, item=item)
+            return " {idx:>3} {ansi0}{item}{ansi1}".format(idx=idx+1, ansi0=ansi0, ansi1=ansi1, item=item)
 
         return ANSI("\n".join(decorate(item, idx) for idx, item in enumerate(self.the_list)))
 
@@ -180,6 +200,8 @@ class BrowserControl(FormattedTextControl):
         @kb.add('e')
         def _(event):
             path = os.path.join(*self.path_stack)
+            if os.path.isdir(path):
+                path = os.path.join(path, self.the_list[self.cursor_position.y])
             zp = next(zp for zp in get_coordinators() if zp.get_speaker_info()['zone_name'] == 'Home Theatre')
             enqueue_playlist(zp, path)
         return kb
@@ -200,10 +222,19 @@ def build_key_bindings():
 
 def make_app(playlists_dir):
     def status_bar_text():
-        name = "ZorP"
+        name = browser_control.path_stack[-1]
+        if name.endswith('.json'):
+            try:
+                zpname, ts = os.path.basename(name).split('.')[1:-1]
+                y, mo, d, h, mi, s = ts[0:4], ts[4:6], ts[6:8], ts[8:10], ts[10:12], ts[12:14]
+                name = "{} : {}/{}/{} {}:{}".format(zpname, y, mo, d, h, mi, s)
+            except ValueError:
+                name = os.path.basename(name)
+
         return "{name} : 'q': quit | <up>/<down> moves | <space> selects | 'e' enqueues".format(name=name)
 
-    listview_window = Window(BrowserControl(playlists_dir))
+    browser_control = BrowserControl(playlists_dir)
+    listview_window = Window(browser_control)
     status_bar_window = Window(content=FormattedTextControl(status_bar_text), height=1, style='reverse')
 
     root_container = FloatContainer(
@@ -221,7 +252,7 @@ def ui(playlists_dir):
     make_app(playlists_dir).run()
 
 if __name__ == "__main__":
-    logging.basicConfig(filename='sonos.log', level=logging.DEBUG)
+    logging.basicConfig(filename='sonos.log', level=logging.INFO)
 
     # FIXME: this would be much nicer with sub-parsers
     #
@@ -249,7 +280,8 @@ if __name__ == "__main__":
     parser.exit(0)
 
 # TODO :
-#   - dialog to pick ZP for enqueue
+#   - "select from list" dialog to pick ZP for enqueue
 #   - conf dialog before enqueue
 #   - works for multi-level subdirs (os.path.join(root_path, x) makes assumption of 1-level depth)
-#   - enqueues proper human readable names
+#   - 'please wait' dialog during enqueue
+#   - make 'enqueue' really fast, why is it so slow?
