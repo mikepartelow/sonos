@@ -8,10 +8,13 @@ import datetime
 import argparse
 from soco.compat import urlparse
 from prompt_toolkit import Application
+from prompt_toolkit.application import get_app
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.layout.screen import Point
 from prompt_toolkit.layout.layout import Layout
+from prompt_toolkit.widgets import Dialog, Button
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import FloatContainer, Float
 from prompt_toolkit.layout.controls import FormattedTextControl
 from soco.data_structures import to_didl_string, DidlMusicTrack
 from prompt_toolkit.layout.containers import HSplit, Window, FloatContainer
@@ -86,6 +89,53 @@ def dump_queue(zps, playlists_dir):
 
         with open(path, "wb") as f:
             f.write(json.dumps(tracks).encode('utf-8'))
+
+class OKDialog(Dialog):
+    def __init__(self, title='OK', body='Dialog', button_text='OK', buttons=None, width=None):
+        self.app = get_app()
+
+        if buttons is None:
+            buttons = [Button(text=button_text, handler=self.button_handler),]
+
+        super().__init__(title=title, body=Window(content=FormattedTextControl(text=ANSI(body))), buttons=buttons, width=width)
+
+    def button_handler(self):
+        self.app.layout.container.floats.pop()
+        self.app.layout.focus(self.app.layout.container.content.children[0])
+
+    def display(self):
+        self.app.layout.container.floats.append(Float(content=self))
+        self.app.layout.focus(self)
+
+class ConfirmationDialog(OKDialog):
+    def __init__(self, title='Yes/No?', body='Dialog', yes_callback=None):
+        self.yes_callback = yes_callback
+
+        super().__init__(title,
+                         body,
+                         buttons=[Button(text='No', handler=self.no_handler), Button(text='Yes', handler=self.yes_handler)])
+
+    def yes_handler(self):
+        if self.yes_callback:
+            self.yes_callback()
+        super().button_handler()
+
+    def no_handler(self):
+        super().button_handler()
+
+class CheesyPicker(OKDialog):
+    def __init__(self, title='Pick One', choices=('Pepperoni', 'Mushrooms', 'Plain Cheese'), handler=None):
+        self.handler = handler
+        body = "\n".join("{}) {}".format(chr(ord('a') + idx), choice) for idx, choice in enumerate(choices))
+        buttons = [ Button(text="{}".format(chr(ord('a') + idx)), handler=lambda: self.root_handler(choice)) for idx, choice in enumerate(choices) ]
+
+        super().__init__(title, body, buttons=buttons)
+
+    def root_handler(self, choice):
+        logging.info("choice: %s", choice)
+        super().button_handler()
+        if self.handler is not None:
+            self.handler(choice)
 
 class BrowserControl(FormattedTextControl):
     def __init__(self, root_path):
@@ -202,8 +252,22 @@ class BrowserControl(FormattedTextControl):
             path = os.path.join(*self.path_stack)
             if os.path.isdir(path):
                 path = os.path.join(path, self.the_list[self.cursor_position.y])
-            zp = next(zp for zp in get_coordinators() if zp.get_speaker_info()['zone_name'] == 'Home Theatre')
-            enqueue_playlist(zp, path)
+
+            def confirm(zp):
+                ConfirmationDialog(title="Enqueue Playlist?",
+                                   body="Enqueue Playlist '{}' to '{}'?".format(os.path.basename(path), zp.get_speaker_info()['zone_name']),
+                                   yes_callback=lambda: enqueue_playlist(zp, path),
+                ).display()
+
+            coordinators = list(get_coordinators())
+            if len(coordinators) > 1:
+                coordinator_names = [ zp.get_speaker_info()['zone_name'] for zp in coordinators ]
+                CheesyPicker(title='Enqueue to Which Coordinator?',
+                             choices=coordinator_names,
+                             handler=confirm).display()
+            else:
+                confirm(coordinators[0])
+
         return kb
 
 def build_key_bindings():
@@ -280,8 +344,7 @@ if __name__ == "__main__":
     parser.exit(0)
 
 # TODO :
-#   - "select from list" dialog to pick ZP for enqueue
-#   - conf dialog before enqueue
 #   - works for multi-level subdirs (os.path.join(root_path, x) makes assumption of 1-level depth)
-#   - 'please wait' dialog during enqueue
 #   - make 'enqueue' really fast, why is it so slow?
+#   - works in mac terminal - for Bryan
+#   - proper README
