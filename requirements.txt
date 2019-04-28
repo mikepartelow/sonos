@@ -1,1 +1,2 @@
 soco
+prompt_toolkit
