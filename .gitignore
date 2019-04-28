@@ -1,2 +1,4 @@
 venv
 playlists
+__pycache__
+sonos.log
