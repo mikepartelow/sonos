@@ -85,7 +85,7 @@ def dump_queue(zps, playlists_dir):
         zpname = zp.get_speaker_info()['zone_name']
         path = "{}/queue.{}.{}.json".format(playlists_dir, zpname, timestamp)
 
-        tracks = [ item.to_dict() for item in zp.get_queue(max_items=99999) ]
+        tracks = [ item.to_dict() for item in zp.get_queue(max_items=99999) if hasattr(item, 'to_dict') ]
 
         with open(path, "wb") as f:
             f.write(json.dumps(tracks).encode('utf-8'))
@@ -253,7 +253,8 @@ class BrowserControl(FormattedTextControl):
             if os.path.isdir(path):
                 path = os.path.join(path, self.the_list[self.cursor_position.y])
 
-            def confirm(zp):
+            def confirm(zpname):
+                zp = next(zp for zp in get_coordinators() if zp.get_speaker_info()['zone_name'] == zpname)
                 ConfirmationDialog(title="Enqueue Playlist?",
                                    body="Enqueue Playlist '{}' to '{}'?".format(os.path.basename(path), zp.get_speaker_info()['zone_name']),
                                    yes_callback=lambda: enqueue_playlist(zp, path),
@@ -266,7 +267,7 @@ class BrowserControl(FormattedTextControl):
                              choices=coordinator_names,
                              handler=confirm).display()
             else:
-                confirm(coordinators[0])
+                confirm(coordinators[0]['zone name'])
 
         return kb
 
